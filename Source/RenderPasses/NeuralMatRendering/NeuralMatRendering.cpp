@@ -383,7 +383,7 @@ void NeuralMatRendering::loadNetwork(RenderContext* pRenderContext)
 
     // cuda inference helper
     if (mpNBTF[0] == nullptr)
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 6; i++)
             mpNBTF[i] = std::make_shared<NBTF>(mpDevice, mModelInfo[i].name, true);
     mpNBTFInt8 = mpNBTF[static_cast<int>(mModelName)];
 

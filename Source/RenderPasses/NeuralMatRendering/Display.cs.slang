@@ -31,7 +31,7 @@ void csMain(uint3 dispatchThreadId: SV_DispatchThreadID)
         btfVal = float4(0);
     if (gNeedHDRRecon) {
         btfVal = exp(btfVal) - 1.0f;
-        btfVal = pow(btfVal, 1.0f / 1.4f);
+        // btfVal = pow(btfVal, 1.0f / 1.4f);
     }
 
     gOutputColor[pixel] *= btfVal;
