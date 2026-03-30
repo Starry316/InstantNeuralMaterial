@@ -87,7 +87,6 @@ RenderPassReflection NeuralMatRendering::reflect(const CompileData& compileData)
     return reflector;
 }
 
-
 // This pass is used to get the primary ray's hit, and pack the input data for the neural network inference.
 void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
@@ -95,7 +94,6 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     // Get dimensions of ray dispatch.
     const Falcor::uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-
 
     createBuffer(mpValidBuffer, mpDevice, targetDim, 1);
     createBuffer(mpPackedInputBuffer, mpDevice, targetDim, 5);
@@ -178,7 +176,8 @@ void NeuralMatRendering::cudaInferPass(RenderContext* pRenderContext, const Rend
             targetDim.x,
             targetDim.y,
             (int*)mpValidBuffer->getGpuAddress(),
-            UV_SCALE
+            UV_SCALE,
+            mIsHalfAccumulation
         );
     else
         mpNBTFInt8->mpMLPCuda->inferInt8(
@@ -188,7 +187,8 @@ void NeuralMatRendering::cudaInferPass(RenderContext* pRenderContext, const Rend
             targetDim.x,
             targetDim.y,
             (int*)mpValidBuffer->getGpuAddress(),
-            UV_SCALE
+            UV_SCALE,
+            mIsHalfAccumulation
         );
     cudaDeviceSynchronize();
     cudaEventRecord(mCudaStop, NULL);
@@ -214,7 +214,6 @@ void NeuralMatRendering::displayPass(RenderContext* pRenderContext, const Render
     mpDisplayPass->execute(pRenderContext, targetDim.x, targetDim.y);
     mpPixelDebug->endFrame(pRenderContext);
 }
-
 
 void NeuralMatRendering::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
@@ -248,103 +247,113 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
     bool editCurve = false;
-    widget.text("Inference time: " + std::to_string(mCudaTime) + " ms");
+    widget.text("CUDA Inference time: " + std::to_string(mCudaTime) + " ms");
     widget.text("Avg Inference time: " + std::to_string(mCudaAvgTime / mCudaAccumulatedFrames) + " ms");
     if (widget.button("Reset CUDA Timer"))
     {
         mCudaAvgTime = mCudaTime;
         mCudaAccumulatedFrames = 1;
     }
-    widget.dropdown("Model", mModelName);
-    if(widget.button("Load", true)){
+    widget.dropdown(" ", mModelName);
+    if (widget.button("Load model", true))
+    {
         loadNetwork(mpDevice->getRenderContext());
         dirty = true;
     }
 
-    dirty |= widget.slider("Env rot X", mEnvRotAngle.x, 0.0f, 360.0f);
-    if (widget.button("X -", true))
-    {
-        mEnvRotAngle.x -= 5;
-        dirty = true;
-    }
-    if (widget.button("X +", true))
-    {
-        mEnvRotAngle.x += 5;
-        dirty = true;
-    }
-    dirty |= widget.slider("Env rot Y", mEnvRotAngle.y, 0.0f, 360.0f);
-    if (widget.button("Y -", true))
-    {
-        mEnvRotAngle.y -= 5;
-        dirty = true;
-    }
-    if (widget.button("Y +", true))
-    {
-        mEnvRotAngle.y += 5;
-        dirty = true;
-    }
-    dirty |= widget.slider("Env rot Z", mEnvRotAngle.z, 0.0f, 360.0f);
-    if (widget.button("Z -", true))
-    {
-        mEnvRotAngle.z -= 5;
-        dirty = true;
-    }
-    if (widget.button("Z +", true))
-    {
-        mEnvRotAngle.z += 5;
-        dirty = true;
-    }
-    editCurve |= widget.dropdown("Curve Type", mCurveType);
-    dirty |= widget.slider("UV Scale", UV_SCALE, 0.0f, 50.0f);
+    dirty |= widget.slider("UV Scaling", UV_SCALE, 0.0f, 50.0f);
     dirty |= widget.checkbox("Apply Synthesis", mApplySyn);
-    editCurve |= widget.var("pos1", point_data[1], 0.0f, 1.0f);
-    editCurve |= widget.var("pos2", point_data[2], 0.0f, 1.0f);
-    if (mCurveType == ACFCurve::BEZIER)
+
+// if (auto group = widget.group("Envmap Control", false))
     {
-        editCurve |= widget.bezierCurve("Controll Curve", getPoint, (void*)point_data, 4, 300, 300);
+        dirty |= widget.slider("Env rot X", mEnvRotAngle.x, 0.0f, 360.0f);
+        if (widget.button("X -", true))
+        {
+            mEnvRotAngle.x -= 5;
+            dirty = true;
+        }
+        if (widget.button("X +", true))
+        {
+            mEnvRotAngle.x += 5;
+            dirty = true;
+        }
+        dirty |= widget.slider("Env rot Y", mEnvRotAngle.y, 0.0f, 360.0f);
+        if (widget.button("Y -", true))
+        {
+            mEnvRotAngle.y -= 5;
+            dirty = true;
+        }
+        if (widget.button("Y +", true))
+        {
+            mEnvRotAngle.y += 5;
+            dirty = true;
+        }
+        dirty |= widget.slider("Env rot Z", mEnvRotAngle.z, 0.0f, 360.0f);
+        if (widget.button("Z -", true))
+        {
+            mEnvRotAngle.z -= 5;
+            dirty = true;
+        }
+        if (widget.button("Z +", true))
+        {
+            mEnvRotAngle.z += 5;
+            dirty = true;
+        }
     }
-    else if (mCurveType == ACFCurve::X6)
-        widget.graph("Controll Curve", getPointX6, (void*)point_data_curve, 40, 0, FLT_MIN, FLT_MAX, 300, 300);
-    else
-        widget.graph("Controll Curve", getPointX, (void*)point_data_curve, 40, 0, FLT_MIN, FLT_MAX, 300, 300);
-    dirty |= editCurve;
-    if (editCurve)
-        mpNBTFInt8->mpTextureSynthesis->updateMap(mpNBTFInt8->mUP.texDim.x, mpDevice, point_data, mCurveType);
-    widget.image("ACF", mpNBTFInt8->mpTextureSynthesis->mpACF.get(), Falcor::float2(300.f));
-    widget.text("ACF visualization");
 
-    dirty |= widget.slider("Max Shell Height", MAX_HEIGHT, 0.0f, 1.0f);
-    widget.tooltip("Max height to mesh surface, i.e., the HF tracing starting height", true);
+    if (auto group = widget.group("ACF Curve Edit", false))
+    {
+        editCurve |= widget.dropdown("Curve Type", mCurveType);
 
-    dirty |= widget.var("UV Scale_", UV_SCALE);
-    widget.tooltip("Scale the uv coords", true);
+        editCurve |= widget.var("pos1", point_data[1], 0.0f, 1.0f);
+        editCurve |= widget.var("pos2", point_data[2], 0.0f, 1.0f);
+        if (mCurveType == ACFCurve::BEZIER)
+        {
+            editCurve |= widget.bezierCurve("Controll Curve", getPoint, (void*)point_data, 4, 300, 300);
+        }
+        else if (mCurveType == ACFCurve::X6)
+            widget.graph("Controll Curve", getPointX6, (void*)point_data_curve, 40, 0, FLT_MIN, FLT_MAX, 300, 300);
+        else
+            widget.graph("Controll Curve", getPointX, (void*)point_data_curve, 40, 0, FLT_MIN, FLT_MAX, 300, 300);
+        dirty |= editCurve;
+        if (editCurve)
+            mpNBTFInt8->mpTextureSynthesis->updateMap(mpNBTFInt8->mUP.texDim.x, mpDevice, point_data, mCurveType);
+        widget.text("ACF visualization");
+        widget.image("ACF", mpNBTFInt8->mpTextureSynthesis->mpACF.get(), Falcor::float2(300.f));
+    }
+    if (auto group = widget.group("Displacement Control", false))
+    {
+        dirty |= widget.checkbox("Show Traced HF", mShowTracedHF);
+        dirty |= widget.slider("Max Shell Height", MAX_HEIGHT, 0.0f, 1.0f);
+        widget.tooltip("Max height to mesh surface, i.e., the HF tracing starting height", true);
 
-    dirty |= widget.slider("HF Offset", HF_OFFSET, 0.0f, 1.0f);
-    widget.tooltip("height = Scale * h + Offset", true);
-    dirty |= widget.slider("HF Scale", HF_SCALE, 0.0f, 1.0f);
-    widget.tooltip("height = Scale * h + Offset", true);
+        dirty |= widget.var("UV Scale_", UV_SCALE);
+        widget.tooltip("Scale the uv coords", true);
 
+        dirty |= widget.slider("HF Offset", HF_OFFSET, 0.0f, 1.0f);
+        widget.tooltip("height = Scale * h + Offset", true);
+        dirty |= widget.slider("HF Scale", HF_SCALE, 0.0f, 1.0f);
+        widget.tooltip("height = Scale * h + Offset", true);
+    }
+    
+    dirty |= widget.checkbox("Use half accumulation", mIsHalfAccumulation);
+    widget.tooltip(
+        "Dequantized to half precision, resulting in improved performance but potentially reduced quality, as discussed in the paper.", true
+    );
     dirty |= widget.checkbox("Traced Shadow Ray", mTracedShadowRay);
     widget.tooltip("Position offset along with the normal dir. To avoid self-occlusion", true);
 
-    dirty |= widget.checkbox("Show Traced HF", mShowTracedHF);
-
-    if (widget.button("Reset Envmap"))
+    if (widget.button("Reset Envmap (click this after loading a new scene)"))
     {
         mpEnvMapSampler = std::make_unique<EnvMapSampler>(mpDevice, mpScene->getEnvMap());
         dirty = true;
     }
     widget.tooltip("Refresh the importance sampling map for new loaded envmap", true);
-
     if (mpScene->getEnvMap())
     {
         mpScene->getEnvMap()->setRotation(mEnvRotAngle);
     }
     mpPixelDebug->renderUI(widget);
-
-
-
-
 
     // If rendering options that modify the output have changed, set flag to indicate that.
     // In execute() we will pass the flag to other passes for reset of temporal data etc.
@@ -356,10 +365,8 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
     }
 }
 
-
 void NeuralMatRendering::loadNetwork(RenderContext* pRenderContext)
 {
-
     ModelInfo model = mModelInfo[static_cast<int>(mModelName)];
     mHDRBTF = model.HDRBTF;
 
@@ -373,13 +380,10 @@ void NeuralMatRendering::loadNetwork(RenderContext* pRenderContext)
     );
     generateMaxMip(pRenderContext, mpHF);
 
-
     // HF texture synthesis helper
     mpTextureSynthesis = std::make_unique<TextureSynthesis>();
     mpTextureSynthesis->readHFData(fmt::format("{}/media/neural_materials/heightmaps/{}", mProjectPath, model.hfName).c_str(), mpDevice);
     generateMaxMip(pRenderContext, mpTextureSynthesis->mpHFT);
-
-
 
     // cuda inference helper
     if (mpNBTF[0] == nullptr)
@@ -387,18 +391,9 @@ void NeuralMatRendering::loadNetwork(RenderContext* pRenderContext)
             mpNBTF[i] = std::make_shared<NBTF>(mpDevice, mModelInfo[i].name, true);
     mpNBTFInt8 = mpNBTF[static_cast<int>(mModelName)];
 
-
     // // quantization scale buffer
-    mpScaleBuffer = mpDevice->createBuffer(
-        8 * sizeof(float),
-        ResourceBindFlags::Shared,
-        MemoryType::DeviceLocal,
-        model.scales
-    );
+    mpScaleBuffer = mpDevice->createBuffer(8 * sizeof(float), ResourceBindFlags::Shared, MemoryType::DeviceLocal, model.scales);
 }
-
-
-
 
 void NeuralMatRendering::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
@@ -489,23 +484,17 @@ void NeuralMatRendering::setScene(RenderContext* pRenderContext, const ref<Scene
     DefineList defines = mpScene->getSceneDefines();
     mpDisplayPass = ComputePass::create(mpDevice, "RenderPasses/NeuralMatRendering/Display.cs.slang", "csMain", defines);
 
-
     // Create max sampler for HF texel fetch.
     Sampler::Desc samplerDesc = Sampler::Desc();
     samplerDesc.setReductionMode(TextureReductionMode::Max);
     samplerDesc.setFilterMode(TextureFilteringMode::Point, TextureFilteringMode::Point, TextureFilteringMode::Point);
     mpMaxSampler = mpDevice->createSampler(samplerDesc);
 
-
     // cuda timer
     cudaEventCreate(&mCudaStart);
     cudaEventCreate(&mCudaStop);
 
     loadNetwork(pRenderContext);
-
-
-
-
 }
 
 void NeuralMatRendering::prepareVars()

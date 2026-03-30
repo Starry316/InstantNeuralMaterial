@@ -53,8 +53,16 @@ void MLPCuda::loadInt8(ref<Device> pDevice, std::string networkPath)
     logInfo("[MLPCuda] QINT8 buffer  {} {} {} {}", int8Weight[0], int8Weight[1], int8Weight[2], int8Weight[3]);
 }
 
-
-void MLPCuda::inferInt8Syn(int* packedInput, float* quantizationScales,float* output, int width, int height, int* valid, float scale)
+void MLPCuda::inferInt8Syn(
+    int* packedInput,
+    float* quantizationScales,
+    float* output,
+    int width,
+    int height,
+    int* valid,
+    float scale,
+    bool isHalfAccumulation
+)
 {
     launchInferSyn(
         (int*)mpInt8Buffer->getGpuAddress(),
@@ -70,14 +78,36 @@ void MLPCuda::inferInt8Syn(int* packedInput, float* quantizationScales,float* ou
         width,
         height,
         valid,
-        scale
+        scale,
+        isHalfAccumulation
     );
 }
 
-void MLPCuda::inferInt8(int* packedInput, float* quantizationScales, float* output, int width, int height, int* valid, float scale)
+void MLPCuda::inferInt8(
+    int* packedInput,
+    float* quantizationScales,
+    float* output,
+    int width,
+    int height,
+    int* valid,
+    float scale,
+    bool isHalfAccumulation
+)
 {
-    launchInferInt8((int*)mpInt8Buffer->getGpuAddress(), packedInput,  quantizationScales, mHTexObj, mDTexObj, mUTexObj, output, width, height, valid, scale);
+    launchInferInt8(
+        (int*)mpInt8Buffer->getGpuAddress(),
+        packedInput,
+        quantizationScales,
+        mHTexObj,
+        mDTexObj,
+        mUTexObj,
+        output,
+        width,
+        height,
+        valid,
+        scale,
+        isHalfAccumulation
+    );
 }
-
 
 } // namespace Falcor

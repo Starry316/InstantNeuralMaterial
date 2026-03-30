@@ -11,7 +11,8 @@ void launchInferInt8(
     float* output,
     unsigned int width,
     unsigned int height,
-    int* validMask, float uvScale
+    int* validMask, float uvScale,
+    bool isHalfAccumulation
 );
 
 // inference with synthesis
@@ -28,6 +29,7 @@ void launchInferSyn(
     float* output,
     unsigned int width,
     unsigned int height,
-    int* validMask, float uvScale
+    int* validMask, float uvScale,
+    bool isHalfAccumulation
 );
 

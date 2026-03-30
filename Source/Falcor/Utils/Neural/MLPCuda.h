@@ -19,9 +19,9 @@ public:
     void loadFP32(ref<Device> pDevice, std::string networkPath);
 
     void inferInt8(int* packedInput, float* output, int width, int height, int* valid, float scale);
-    void inferInt8(int* packedInput, float* quantizationScales, float* output, int width, int height, int* valid, float scale);
+    void inferInt8(int* packedInput, float* quantizationScales, float* output, int width, int height, int* valid, float scale, bool isHalfAccumulation = false);
     void inferInt8Hashed(int* packedInput,  float* output, int width, int height, int* valid, float scale);
-    void inferInt8Syn(int* packedInput, float* quantizationScales, float* output, int width, int height, int* valid, float scale);
+    void inferInt8Syn(int* packedInput, float* quantizationScales, float* output, int width, int height, int* valid, float scale, bool isHalfAccumulation = false);
 
     // void inferFp32(int* packedInput, float* output, int width, int height, int* valid, float scale);
     // void inferFp16(int* packedInput, float* output, int width, int height, int* valid, float scale);

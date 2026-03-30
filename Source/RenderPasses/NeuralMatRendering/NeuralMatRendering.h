@@ -245,6 +245,7 @@ private:
     bool mShowTracedHF = false;
     bool mTracedShadowRay = true;
     bool mHDRBTF = false;
+    bool mIsHalfAccumulation = false;
 
     Falcor::float3 mEnvRotAngle = Falcor::float3(0.0f, 0.0f, 0.0f);
     // cuda
