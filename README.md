@@ -2,7 +2,7 @@
 # Comprehensive Neural Materials
 ![](docs/images/representative.png)
 This repository provides an open-source implementation of our paper: Towards Comprehensive Neural Materials: Dynamic Structure-Preserving Synthesis with Accurate Silhouette at Instant Inference Speed. The code is only for reference purposes.
-The core implementation is under `Source/Falcor/Utils/Neural/cuda`. 
+The core implementation is under `Source/Falcor/Utils/Neural/cuda`. The training code is in this repo: https://github.com/Starry316/ComprehensiveNeuralMaterial-Train
 
 ## Prerequisites
 - Windows 10 version 20H2 (October 2020 Update) or newer, OS build revision .789 or newer
