@@ -755,18 +755,10 @@ target_sources(Falcor PRIVATE
     Utils/Neural/MLP.cpp
     Utils/Neural/NBTF.h
     Utils/Neural/NBTF.cpp
-    Utils/Neural/MLPCuda.h
-    Utils/Neural/MLPCuda.cpp
+    Utils/Neural/NBTF.slang
     Utils/Neural/IOHelper.h
     Utils/Neural/IOHelper.cpp
 
-    Utils/Neural/cuda/CUDAConstant.h
-    Utils/Neural/cuda/Utils.h
-    Utils/Neural/cuda/Inference.cu
-    Utils/Neural/cuda/Inference.h
-    Utils/Neural/cuda/TextureHelper.cpp
-    Utils/Neural/cuda/TextureHelper.h
-    Utils/Neural/cuda/CUDADefines.h
 
 
 

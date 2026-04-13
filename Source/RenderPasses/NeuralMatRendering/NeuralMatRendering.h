@@ -34,8 +34,6 @@
 #include "Utils/Texture/Synthesis.h"
 #include "Utils/Neural/MLP.h"
 #include "Utils/Neural/NBTF.h"
-#include "Utils/Neural/MLPCuda.h"
-#include "Utils/Neural/cuda/CUDADefines.h"
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
@@ -102,8 +100,6 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
     void tracingPass(RenderContext* pRenderContext, const RenderData& renderData);
-    void cudaInferPass(RenderContext* pRenderContext, const RenderData& renderData);
-    void displayPass(RenderContext* pRenderContext, const RenderData& renderData);
     void loadNetwork(RenderContext* pRenderContext);
 
 private:
@@ -207,17 +203,12 @@ private:
           1.526358573755715e-05f}},
     };
 
-    // displacement map
-    ref<Texture> mpHF;
-    // max filter sampler for HF texel fetch.
-    ref<Sampler> mpMaxSampler;
+
     std::unique_ptr<PixelDebug> mpPixelDebug;
 
     // cuda inference output buffer
     ref<Buffer> mpOutputBuffer;
     ref<Buffer> mpValidBuffer;
-    ref<Buffer> mpPackedInputBuffer;
-    ref<Buffer> mpScaleBuffer;
 
     Falcor::float4 mControlParas = Falcor::float4(0.1, 10, 0, 0.099);
 
@@ -239,13 +230,15 @@ private:
     std::unique_ptr<TextureSynthesis> mpTextureSynthesis;
     std::shared_ptr<NBTF> mpNBTFInt8;
     std::shared_ptr<NBTF> mpNBTF[6];
-
+    std::shared_ptr<NBTF> mpNBTFFP32;
     std::unique_ptr<EnvMapSampler> mpEnvMapSampler;
 
     bool mShowTracedHF = false;
     bool mTracedShadowRay = true;
     bool mHDRBTF = false;
     bool mIsHalfAccumulation = false;
+    bool mHistoBlending = false;
+    bool mInshader = false;
 
     Falcor::float3 mEnvRotAngle = Falcor::float3(0.0f, 0.0f, 0.0f);
     // cuda

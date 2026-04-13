@@ -13,11 +13,11 @@ MLP::MLP(ref<Device> pDevice, std::string networkName)
     mNetworkName = networkName;
     std::filesystem::path projectDir = getProjectDirectory();
     std::vector<float> weightsBuffer =
-        readBinaryFile(fmt::format("{}/media/BTF/networks/Weights_{}.bin", projectDir.string(), networkName).c_str());
+        readBinaryFile(fmt::format("{}/media/neural_materials/networks/Weight_{}.bin", projectDir.string(), networkName).c_str());
     std::vector<float> biasBuffer =
-        readBinaryFile(fmt::format("{}/media/BTF/networks/Bias_{}.bin", projectDir.string(), networkName).c_str());
+        readBinaryFile(fmt::format("{}/media/neural_materials/networks/Bias_{}.bin", projectDir.string(), networkName).c_str());
     std::vector<float> metaBuffer =
-        readBinaryFile(fmt::format("{}/media/BTF/networks/NNMeta_{}.bin", projectDir.string(), networkName).c_str());
+        readBinaryFile(fmt::format("{}/media/neural_materials/networks/ModelInfo_{}.bin", projectDir.string(), networkName).c_str());
     mLayerNum = metaBuffer[0];
     int totalWeightNum = 0;
     int totalBiasNum = 0;

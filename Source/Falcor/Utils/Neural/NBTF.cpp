@@ -5,7 +5,6 @@
 #include "Core/API/Device.h"
 #include "Utils/Math/FormatConversion.h"
 #include "IOHelper.h"
-#include "cuda/TextureHelper.h"
 #include <fstream>
 namespace Falcor
 {
@@ -14,11 +13,11 @@ std::vector<float> readBinaryFile(const char* filename);
 void NBTF::loadFeature(ref<Device> pDevice, std::string featurePath)
 {
     std::filesystem::path projectDir = getProjectDirectory();
-    std::vector<float> PlaneMetaBuffer =
-        readBinaryFile(fmt::format("{}/media/neural_materials/networks/PlaneMeta_{}.bin", projectDir.string(), featurePath).c_str());
-    mUP.texDim = int2(PlaneMetaBuffer[0], PlaneMetaBuffer[1]);
-    mHP.texDim = int2(PlaneMetaBuffer[2], PlaneMetaBuffer[3]);
-    mDP.texDim = int2(PlaneMetaBuffer[4], PlaneMetaBuffer[5]);
+    std::vector<float> PlaneInfoBuffer =
+        readBinaryFile(fmt::format("{}/media/neural_materials/networks/PlaneInfo_{}.bin", projectDir.string(), featurePath).c_str());
+    mUP.texDim = int2(PlaneInfoBuffer[0], PlaneInfoBuffer[1]);
+    mHP.texDim = int2(PlaneInfoBuffer[2], PlaneInfoBuffer[3]);
+    mDP.texDim = int2(PlaneInfoBuffer[4], PlaneInfoBuffer[5]);
     logInfo("[NBTF] Plane Dims");
     logInfo("[NBTF] U: {}, H: {}, D: {}", mUP.texDim, mHP.texDim, mDP.texDim);
 
@@ -59,9 +58,9 @@ void NBTF::loadFeature(ref<Device> pDevice, std::string featurePath)
 
     mTP.featureData = mpTextureSynthesis->getTData();
     mTPInv.featureData = mpTextureSynthesis->getInvTData();
-    mTP.texDim = int2(PlaneMetaBuffer[0], PlaneMetaBuffer[1]);
-    mTPInv.texDim = int2(mTPInv.featureData.size() / (4 * int(PlaneMetaBuffer[1])), PlaneMetaBuffer[1]);
-    // mTPInv.texDim = int2(8192, PlaneMetaBuffer[1]);
+    mTP.texDim = int2(PlaneInfoBuffer[0], PlaneInfoBuffer[1]);
+    mTPInv.texDim = int2(mTPInv.featureData.size() / (4 * int(PlaneInfoBuffer[1])), PlaneInfoBuffer[1]);
+    // mTPInv.texDim = int2(8192, PlaneInfoBuffer[1]);
     logInfo("[NBTF] T: {}, InvT: {}", mTP.texDim, mTPInv.texDim);
 
     mUP.featureTex = pDevice->createTexture2D(
@@ -88,35 +87,16 @@ NBTF::NBTF(ref<Device> pDevice, std::string networkName, bool buildCuda)
     mpTextureSynthesis = std::make_unique<TextureSynthesis>();
     loadFeature(pDevice, networkName);
 
-    if (buildCuda)
-    {
-        mpMLPCuda = std::make_unique<MLPCuda>();
-        mpMLPCuda->loadInt8(pDevice, fmt::format("{}/media/neural_materials/networks/Weight_int8_{}.bin", getProjectDirectory(), networkName));
-        // mpMLPCuda->loadFP32(pDevice, fmt::format("{}/media/neural_materials/networks/Weight_fp32_{}.bin", getProjectDirectory(), networkName));
-
-        mpMLPCuda->mUTexObj = createCudaTextureArray(mUP.featureData, mUP.texDim.x, mUP.texDim.x, mUP.texDim.y);
-        mpMLPCuda->mHTexObj = createCudaTextureArray(mHP.featureData, mHP.texDim.x, mHP.texDim.x, mHP.texDim.y);
-        mpMLPCuda->mDTexObj = createCudaTextureArray(mDP.featureData, mDP.texDim.x, mDP.texDim.x, mDP.texDim.y);
-
-        mpMLPCuda->mTTexObj = createCudaTextureArray(mTP.featureData, mTP.texDim.x, mTP.texDim.x, mTP.texDim.y);
-        mpMLPCuda->mInvTexObj = createCudaTextureArray(mTPInv.featureData, mTPInv.texDim.x, 1, mTPInv.texDim.y);
-        std::vector<float> sample_data = mpTextureSynthesis->getSampleUV();
-        mpMLPCuda->mpSampleBuffer = pDevice->createBuffer(
-            sample_data.size() * sizeof(float), ResourceBindFlags::Shared, MemoryType::DeviceLocal, sample_data.data()
-        );
-    }
-    // else
-    // {
-    // mpMLP = std::make_unique<MLP>(pDevice, networkName);
-    // }
+   
+        mpMLP = std::make_unique<MLP>(pDevice, networkName);
 }
 
 void NBTF::bindShaderData(const ShaderVar& var) const
 {
-    // if (mBuildCuda)
-    //     return;
+    if (mBuildCuda)
+        return;
 
-    // mpMLP->bindShaderData(var["mlp"]);
+    mpMLP->bindShaderData(var["mlp"]);
     if (mHistogram)
         mpTextureSynthesis->bindFeatureData(var["histoFeatureData"]);
 

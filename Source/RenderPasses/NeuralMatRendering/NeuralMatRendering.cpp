@@ -96,7 +96,7 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     createBuffer(mpValidBuffer, mpDevice, targetDim, 1);
-    createBuffer(mpPackedInputBuffer, mpDevice, targetDim, 5);
+    // createBuffer(mpPackedInputBuffer, mpDevice, targetDim, 5);
 
     // Request the light collection if emissive lights are enabled.
     if (mpScene->getRenderSettings().useEmissiveLights)
@@ -126,12 +126,11 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     var["CB"]["gControlParas"] = mControlParas;
     // var["CB"]["gCurvatureParas"] = mCurvatureParas;
     var["CB"]["gApplySyn"] = mApplySyn;
-    var["CB"]["gShowTracedHF"] = mShowTracedHF;
-    var["CB"]["gTracedShadowRay"] = mTracedShadowRay;
     var["CB"]["gRenderTargetDim"] = targetDim;
 
-    mpTextureSynthesis->bindHFData(var["CB"]["hfData"]);
-    mpNBTFInt8->mpTextureSynthesis->bindMap(var["CB"]["hfData"]);
+    mpNBTFFP32->bindShaderData(var["CB"]["gNBTF"]);
+
+
     if (mpEnvMapSampler)
         mpEnvMapSampler->bindShaderData(var["CB"]["envMapSampler"]);
 
@@ -148,11 +147,8 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
         bind(channel);
 
     // Bind textures
-    var["gHF"].setSrv(mpHF->getSRV());
-    var["cudaValidBuffer"] = mpValidBuffer;
-
-    var["packedInput"] = mpPackedInputBuffer;
-    var["gMaxSampler"] = mpMaxSampler;
+    var["gOutputColor"] = renderData.getTexture("color");
+    // var["gMaxSampler"] = mpMaxSampler;
 
     mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, Falcor::uint3(targetDim, 1));
     pRenderContext->submit(false);
@@ -160,60 +156,6 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     mpFence->wait();
 }
 
-// NN inference pass
-// This pass is used to run the neural network inference to get the reflectance
-void NeuralMatRendering::cudaInferPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    Falcor::uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-    createBuffer(mpOutputBuffer, mpDevice, targetDim, 4);
-    cudaEventRecord(mCudaStart, NULL);
-    if (mApplySyn)
-        mpNBTFInt8->mpMLPCuda->inferInt8Syn(
-            (int*)mpPackedInputBuffer->getGpuAddress(),
-            (float*)mpScaleBuffer->getGpuAddress(),
-            (float*)mpOutputBuffer->getGpuAddress(),
-            targetDim.x,
-            targetDim.y,
-            (int*)mpValidBuffer->getGpuAddress(),
-            UV_SCALE,
-            mIsHalfAccumulation
-        );
-    else
-        mpNBTFInt8->mpMLPCuda->inferInt8(
-            (int*)mpPackedInputBuffer->getGpuAddress(),
-            (float*)mpScaleBuffer->getGpuAddress(),
-            (float*)mpOutputBuffer->getGpuAddress(),
-            targetDim.x,
-            targetDim.y,
-            (int*)mpValidBuffer->getGpuAddress(),
-            UV_SCALE,
-            mIsHalfAccumulation
-        );
-    cudaDeviceSynchronize();
-    cudaEventRecord(mCudaStop, NULL);
-    cudaEventSynchronize(mCudaStop);
-    cudaEventElapsedTime(&mCudaTime, mCudaStart, mCudaStop);
-    mCudaAvgTime += mCudaTime;
-    mCudaAccumulatedFrames++;
-}
-
-// After the inference pass, we muliply the reflectance with the Li and write the result to the output buffer.
-void NeuralMatRendering::displayPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    Falcor::uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-    auto var = mpDisplayPass->getRootVar();
-    var["PerFrameCB"]["gRenderTargetDim"] = targetDim;
-    var["PerFrameCB"]["gNeedHDRRecon"] = mHDRBTF;
-    var["gOutputColor"] = renderData.getTexture("color");
-    var["gInputColor"] = mpOutputBuffer;
-    var["cudaValidBuffer"] = mpValidBuffer;
-    mpPixelDebug->beginFrame(pRenderContext, renderData.getDefaultTextureDims());
-    mpPixelDebug->prepareProgram(mpDisplayPass->getProgram(), mpDisplayPass->getRootVar());
-    mpDisplayPass->execute(pRenderContext, targetDim.x, targetDim.y);
-    mpPixelDebug->endFrame(pRenderContext);
-}
 
 void NeuralMatRendering::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
@@ -238,22 +180,13 @@ void NeuralMatRendering::execute(RenderContext* pRenderContext, const RenderData
     }
 
     tracingPass(pRenderContext, renderData);
-    cudaInferPass(pRenderContext, renderData);
-    displayPass(pRenderContext, renderData);
     mFrameCount++;
 }
 
 void NeuralMatRendering::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    bool editCurve = false;
-    widget.text("CUDA Inference time: " + std::to_string(mCudaTime) + " ms");
-    widget.text("Avg Inference time: " + std::to_string(mCudaAvgTime / mCudaAccumulatedFrames) + " ms");
-    if (widget.button("Reset CUDA Timer"))
-    {
-        mCudaAvgTime = mCudaTime;
-        mCudaAccumulatedFrames = 1;
-    }
+   
     widget.dropdown(" ", mModelName);
     if (widget.button("Load model", true))
     {
@@ -264,7 +197,7 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
     dirty |= widget.slider("UV Scaling", UV_SCALE, 0.0f, 50.0f);
     dirty |= widget.checkbox("Apply Synthesis", mApplySyn);
 
-// if (auto group = widget.group("Envmap Control", false))
+    // if (auto group = widget.group("Envmap Control", false))
     {
         dirty |= widget.slider("Env rot X", mEnvRotAngle.x, 0.0f, 360.0f);
         if (widget.button("X -", true))
@@ -300,48 +233,9 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
             dirty = true;
         }
     }
-
-    if (auto group = widget.group("ACF Curve Edit", false))
-    {
-        editCurve |= widget.dropdown("Curve Type", mCurveType);
-
-        editCurve |= widget.var("pos1", point_data[1], 0.0f, 1.0f);
-        editCurve |= widget.var("pos2", point_data[2], 0.0f, 1.0f);
-        if (mCurveType == ACFCurve::BEZIER)
-        {
-            editCurve |= widget.bezierCurve("Controll Curve", getPoint, (void*)point_data, 4, 300, 300);
-        }
-        else if (mCurveType == ACFCurve::X6)
-            widget.graph("Controll Curve", getPointX6, (void*)point_data_curve, 40, 0, FLT_MIN, FLT_MAX, 300, 300);
-        else
-            widget.graph("Controll Curve", getPointX, (void*)point_data_curve, 40, 0, FLT_MIN, FLT_MAX, 300, 300);
-        dirty |= editCurve;
-        if (editCurve)
-            mpNBTFInt8->mpTextureSynthesis->updateMap(mpNBTFInt8->mUP.texDim.x, mpDevice, point_data, mCurveType);
-        widget.text("ACF visualization");
-        widget.image("ACF", mpNBTFInt8->mpTextureSynthesis->mpACF.get(), Falcor::float2(300.f));
-    }
-    if (auto group = widget.group("Displacement Control", false))
-    {
-        dirty |= widget.checkbox("Show Traced HF", mShowTracedHF);
-        dirty |= widget.slider("Max Shell Height", MAX_HEIGHT, 0.0f, 1.0f);
-        widget.tooltip("Max height to mesh surface, i.e., the HF tracing starting height", true);
-
-        dirty |= widget.var("UV Scale_", UV_SCALE);
-        widget.tooltip("Scale the uv coords", true);
-
-        dirty |= widget.slider("HF Offset", HF_OFFSET, 0.0f, 1.0f);
-        widget.tooltip("height = Scale * h + Offset", true);
-        dirty |= widget.slider("HF Scale", HF_SCALE, 0.0f, 1.0f);
-        widget.tooltip("height = Scale * h + Offset", true);
-    }
     
-    dirty |= widget.checkbox("Use half accumulation", mIsHalfAccumulation);
-    widget.tooltip(
-        "Dequantized to half precision, resulting in improved performance but potentially reduced quality, as discussed in the paper.", true
-    );
-    dirty |= widget.checkbox("Traced Shadow Ray", mTracedShadowRay);
-    widget.tooltip("Position offset along with the normal dir. To avoid self-occlusion", true);
+
+  
 
     if (widget.button("Reset Envmap (click this after loading a new scene)"))
     {
@@ -367,32 +261,8 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
 
 void NeuralMatRendering::loadNetwork(RenderContext* pRenderContext)
 {
-    ModelInfo model = mModelInfo[static_cast<int>(mModelName)];
-    mHDRBTF = model.HDRBTF;
+    mpNBTFFP32 = std::make_shared<NBTF>(mpDevice, "leather08", false);
 
-    // HF texture
-    mpHF = Texture::createFromFile(
-        mpDevice,
-        fmt::format("{}/media/neural_materials/heightmaps/{}", mProjectPath, model.hfName).c_str(),
-        true,
-        false,
-        ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget
-    );
-    generateMaxMip(pRenderContext, mpHF);
-
-    // HF texture synthesis helper
-    mpTextureSynthesis = std::make_unique<TextureSynthesis>();
-    mpTextureSynthesis->readHFData(fmt::format("{}/media/neural_materials/heightmaps/{}", mProjectPath, model.hfName).c_str(), mpDevice);
-    generateMaxMip(pRenderContext, mpTextureSynthesis->mpHFT);
-
-    // cuda inference helper
-    if (mpNBTF[0] == nullptr)
-        for (int i = 0; i < 6; i++)
-            mpNBTF[i] = std::make_shared<NBTF>(mpDevice, mModelInfo[i].name, true);
-    mpNBTFInt8 = mpNBTF[static_cast<int>(mModelName)];
-
-    // // quantization scale buffer
-    mpScaleBuffer = mpDevice->createBuffer(8 * sizeof(float), ResourceBindFlags::Shared, MemoryType::DeviceLocal, model.scales);
 }
 
 void NeuralMatRendering::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
@@ -484,11 +354,7 @@ void NeuralMatRendering::setScene(RenderContext* pRenderContext, const ref<Scene
     DefineList defines = mpScene->getSceneDefines();
     mpDisplayPass = ComputePass::create(mpDevice, "RenderPasses/NeuralMatRendering/Display.cs.slang", "csMain", defines);
 
-    // Create max sampler for HF texel fetch.
-    Sampler::Desc samplerDesc = Sampler::Desc();
-    samplerDesc.setReductionMode(TextureReductionMode::Max);
-    samplerDesc.setFilterMode(TextureFilteringMode::Point, TextureFilteringMode::Point, TextureFilteringMode::Point);
-    mpMaxSampler = mpDevice->createSampler(samplerDesc);
+
 
     // cuda timer
     cudaEventCreate(&mCudaStart);
