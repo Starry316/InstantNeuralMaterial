@@ -29,11 +29,9 @@
 #include "NeuralMatRendering.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
-#include "Utils/CudaUtils.h"
 #include "Utils/Neural/IOHelper.h"
 #include "Tools/Utils.h"
-#include <cuda_runtime.h>
-#include <cuda_fp16.h>
+
 
 #define MAX_HEIGHT mControlParas.x
 #define UV_SCALE mControlParas.y
@@ -126,7 +124,7 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     var["CB"]["gMaxBounces"] = mMaxBounces;
     var["CB"]["gNeumatID"] = mNeumatID;
 
-    mpNBTFFP32->bindShaderData(var["CB"]["gNBTF"]);
+    mpNBTF->bindShaderData(var["CB"]["gNBTF"]);
 
 
     if (mpEnvMapSampler)
@@ -182,8 +180,9 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
    
-    widget.dropdown(" ", mModelName);
-    if (widget.button("Load model", true))
+    widget.textbox("Load model name", mNetworkName);
+    widget.tooltip("the model should be located at <project>/media/neural_materials/networks/", true);
+    if (widget.button("Load model"))
     {
         loadNetwork(mpDevice->getRenderContext());
         dirty = true;
@@ -192,7 +191,9 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
     dirty |= widget.slider("UV Scaling", UV_SCALE, 0.0f, 50.0f);
     dirty |= widget.slider("Max bounces", mMaxBounces, 0u, 10u);
     dirty |= widget.slider("Neumat Material ID", mNeumatID, 0u, 10u);
+    widget.tooltip("Which material is recognized as neural material", true);
     dirty |= widget.checkbox("Apply Synthesis", mApplySyn);
+
 
     // if (auto group = widget.group("Envmap Control", false))
     {
@@ -253,7 +254,8 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
 
 void NeuralMatRendering::loadNetwork(RenderContext* pRenderContext)
 {
-    mpNBTFFP32 = std::make_shared<NBTF>(mpDevice, "leather08", false);
+    logInfo("Loading from media/neural_materials/networks/");
+    mpNBTF = std::make_shared<NBTF>(mpDevice, mNetworkName, false);
 
 }
 

@@ -1,8 +1,8 @@
 
-# Comprehensive Neural Materials
-![](docs/images/representative.png)
-This repository provides an open-source implementation of our paper: Towards Comprehensive Neural Materials: Dynamic Structure-Preserving Synthesis with Accurate Silhouette at Instant Inference Speed. The code is only for reference purposes.
-The core implementation is under `Source/Falcor/Utils/Neural/cuda`. The training code is in this repo: https://github.com/Starry316/ComprehensiveNeuralMaterial-Train
+# Dynamic BTF Synthesis
+![](docs/images/representative.jpg)
+This repository provides an open-source implementation of our paper: A Dynamic BTF Synthesis Scheme. The code is only for reference purposes.
+The core implementation is under `Source/Falcor/RenderPasses/NeuralMatRendering`. The training code is in:
 
 ## Prerequisites
 - Windows 10 version 20H2 (October 2020 Update) or newer, OS build revision .789 or newer
@@ -10,7 +10,6 @@ The core implementation is under `Source/Falcor/Utils/Neural/cuda`. The training
 - [Windows 10 SDK (10.0.19041.0) for Windows 10, version 2004](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk/)
 - A GPU which supports DirectX Raytracing, such as the NVIDIA Titan V or GeForce RTX
 - NVIDIA driver 466.11 or newer
-- CUDA
 
 ## How to build
 Our implementation is built upon the latest Falcor 8.0. Therefore, as a first step, please build Falcor 8.0 by following the official build guide below.
@@ -60,21 +59,16 @@ After completing the Falcor build, you can verify that it runs correctly by laun
 
 If the build is successful, you should see the rendering running as expected.
 
-Since our implementation relies on the CUDA API, we also need to ensure that CUDA is correctly recognized by Falcor and can be used properly.
-
-You can verify this by running the `CudaInterop` sample program.
 
 ### 3. Prepare the Neural Material Assets
 
-1. Please download `neural_materials.zip` from: https://mbzuaiac-my.sharepoint.com/:u:/g/personal/zilin_xu_mbzuai_ac_ae/IQBR4SAyLq5TT52_SvFhIIjVAfsw2S-KKNcvHFdUSORolXw?e=xAJfGS *If the link is no longer available, please contact the author.
-
-
-2. Extract the zip file and copy the `neural_materials` folder into the `media` directory. The correct directory structure should look like:
+1. Please copy the folder `Source/Falcor/RenderPasses/NeuralMatRendering/neural_materials` and paste it to `<projectRoot>/media/`.
+The correct directory structure should look like:
 ```
 media/
 ├── ...
 └── neural_materials/
-    ├── heightmaps
+    ├── networks
     └── ...
 ```
 ### 4. Load and run the demo
@@ -83,14 +77,11 @@ Launch **Mogwai**, then
 1. Go to **File/Load Script** and select `media/neural_materials/NeuMat.py`.
 2. Then go to **File/Load Scene** and load a scene from `media/neural_materials/scene/`.
 
-![](docs/images/demo.png)
+<!-- ![](docs/images/demo.png) -->
 
-We provide multiple scenes and six neural materials. You can freely select them in the GUI.
+We provide only one neural material as an example, and it is not fully trained. Please train your own neural materials and load it using the GUI.
 
-After switching scenes, please click the **Reset Envmap** button to refresh the envmap importance sampling map.
 
-## Potential Issue: Frame Rate Locked
 
-In some cases, the frame rate may appear to be locked or capped. This is most likely caused by V-Sync settings. Unfortunately, Falcor's internal V-Sync setting seems not working.
-
-You may need to disable V-Sync globally in the NVIDIA Control Panel or the NVIDIA App.
+## Potential Issue: Not Seamlessly Tileable
+In our original paper, we preprocess the BTF to be seamlessly tileable (as described in our supplementary material). However, we did not provide those code in this repo. Therefore some BTF may exhibit cuts after synthesis.

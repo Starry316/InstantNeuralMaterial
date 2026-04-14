@@ -1,0 +1,51 @@
+planeMat = Material('plane')
+planeMat.baseColor = float4(0.2, 0.2, 0.3, 1.0)
+planeMat.roughness = 0.2
+planeMat.metallic = 0.1
+planeMat.loadTexture(MaterialTextureSlot.BaseColor, f"textures/TilesMarbleCappuccinoBrickBondHoned001_COL_6K.jpg")
+planeMat.loadTexture(MaterialTextureSlot.Normal, f"textures/TilesMarbleCappuccinoBrickBondHoned001_NRM_6K.jpg")
+
+mtl1 = StandardMaterial('BTFMaterial1')
+# mtl1.loadTexture(MaterialTextureSlot.Displacement, f"textures/white.png")
+# mtl1.displacementScale = 0.1
+
+quadRefMesh = TriangleMesh.createQuad()
+refMeshID = sceneBuilder.addTriangleMesh(quadRefMesh, planeMat)
+refNodeID = sceneBuilder.addNode('Ref', Transform(scaling=80, translation=float3(0, 0, 0), rotationEulerDeg=float3(0, 0, 0)))
+
+
+neumatMesh = TriangleMesh.createFromFile('mesh/cylinder_soft.obj')
+neumatMeshID = sceneBuilder.addTriangleMesh(neumatMesh, mtl1)
+neumatNodeID = sceneBuilder.addNode('neumatMesh', Transform(scaling=20, translation=float3(0, 0, 0)))
+
+
+#
+sceneBuilder.addMeshInstance(neumatNodeID, neumatMeshID)
+sceneBuilder.addMeshInstance(refNodeID, refMeshID)
+
+
+
+# Add camera
+
+# camera2 = Camera('Camera2')
+# camera2.position = float3(4.33529425, 12.4987965, 5.9302907)
+# camera2.target = float3(3.95159268, 11.750247, 5.38950634)
+# camera2.up = float3(0, 1, 0)
+# camera2.focalLength = 35
+# sceneBuilder.addCamera(camera2)
+
+
+camera2 = Camera('Camera2')
+camera2.position = float3(8.38975525, 13.2182875, 10.3711815)
+camera2.target = float3(7.91564655, 12.5599833, 9.78649712)
+camera2.up = float3(0, 1, 0)
+camera2.focalLength = 35
+sceneBuilder.addCamera(camera2)
+
+
+
+sceneBuilder.envMap = EnvMap('envmap/191_1k.hdr')
+sceneBuilder.envMap.rotation = float3(193, 85, 0)
+sceneBuilder.envMap.intensity = 2
+
+

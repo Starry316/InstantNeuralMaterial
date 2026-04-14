@@ -409,7 +409,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
         {
             float3 wi = sd.frame.toLocal(lsDir);
             float NdotL = wi.z > 0 ? wi.z : 0; // BTF already encodes the cosine term.
-            rayData.radiance += rayData.thp * gNBTF.evalDebug(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * NdotL * Li;
+            rayData.radiance += rayData.thp * gNBTF.eval(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * NdotL * Li;
         }
         else
         {
@@ -429,7 +429,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
             float NdotL = wi.z > 0 ? wi.z : 0; // BTF already encodes the cosine term.
             uint4 packedData;
             uint2 pixel = DispatchRaysIndex().xy;
-            rayData.radiance = rayData.thp * gNBTF.evalDebug(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * envLi * NdotL;
+            rayData.radiance = rayData.thp * gNBTF.eval(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * envLi * NdotL;
         }
         else
         {
@@ -443,7 +443,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
         float pdf = 1.0f;
         float3 sampledDir = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), pdf);
         rayData.direction = sd.frame.fromLocal(sampledDir);
-        rayData.thp *= gNBTF.evalDebug(sampledDir, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb / pdf;
+        rayData.thp *= gNBTF.eval(sampledDir, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb / pdf;
     }
 
     else
