@@ -52,7 +52,7 @@ const char kShaderFile[] = "RenderPasses/NeuralMatRendering/MinimalPathTracer.rt
 
 // Ray tracing settings that affect the traversal stack size.
 // These should be set as small as possible.
-const uint32_t kMaxPayloadSizeBytes = 56u;
+const uint32_t kMaxPayloadSizeBytes = 72u;
 const uint32_t kMaxRecursionDepth = 2u;
 
 const ChannelList kOutputChannels = {
@@ -95,9 +95,6 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     const Falcor::uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
-    createBuffer(mpValidBuffer, mpDevice, targetDim, 1);
-    // createBuffer(mpPackedInputBuffer, mpDevice, targetDim, 5);
-
     // Request the light collection if emissive lights are enabled.
     if (mpScene->getRenderSettings().useEmissiveLights)
     {
@@ -124,9 +121,10 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPRNGDimension"] = dict.keyExists(kRenderPassPRNGDimension) ? dict[kRenderPassPRNGDimension] : 0u;
     var["CB"]["gControlParas"] = mControlParas;
-    // var["CB"]["gCurvatureParas"] = mCurvatureParas;
     var["CB"]["gApplySyn"] = mApplySyn;
     var["CB"]["gRenderTargetDim"] = targetDim;
+    var["CB"]["gMaxBounces"] = mMaxBounces;
+    var["CB"]["gNeumatID"] = mNeumatID;
 
     mpNBTFFP32->bindShaderData(var["CB"]["gNBTF"]);
 
@@ -151,9 +149,6 @@ void NeuralMatRendering::tracingPass(RenderContext* pRenderContext, const Render
     // var["gMaxSampler"] = mpMaxSampler;
 
     mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, Falcor::uint3(targetDim, 1));
-    pRenderContext->submit(false);
-    pRenderContext->signal(mpFence.get());
-    mpFence->wait();
 }
 
 
@@ -195,6 +190,8 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
     }
 
     dirty |= widget.slider("UV Scaling", UV_SCALE, 0.0f, 50.0f);
+    dirty |= widget.slider("Max bounces", mMaxBounces, 0u, 10u);
+    dirty |= widget.slider("Neumat Material ID", mNeumatID, 0u, 10u);
     dirty |= widget.checkbox("Apply Synthesis", mApplySyn);
 
     // if (auto group = widget.group("Envmap Control", false))
@@ -233,9 +230,6 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
             dirty = true;
         }
     }
-    
-
-  
 
     if (widget.button("Reset Envmap (click this after loading a new scene)"))
     {
@@ -253,8 +247,6 @@ void NeuralMatRendering::renderUI(Gui::Widgets& widget)
     // In execute() we will pass the flag to other passes for reset of temporal data etc.
     if (dirty)
     {
-        mCudaAvgTime = mCudaTime;
-        mCudaAccumulatedFrames = 1;
         mOptionsChanged = true;
     }
 }
@@ -331,34 +323,9 @@ void NeuralMatRendering::setScene(RenderContext* pRenderContext, const ref<Scene
             );
         }
 
-        if (mpScene->hasGeometryType(Scene::GeometryType::DisplacedTriangleMesh))
-        {
-            sbt->setHitGroup(
-                0,
-                mpScene->getGeometryIDs(Scene::GeometryType::DisplacedTriangleMesh),
-                desc.addHitGroup("scatterDisplacedTriangleMeshClosestHit", "", "displacedTriangleMeshIntersection")
-            );
-            sbt->setHitGroup(
-                1,
-                mpScene->getGeometryIDs(Scene::GeometryType::DisplacedTriangleMesh),
-                desc.addHitGroup("", "", "displacedTriangleMeshIntersectionShadow")
-            );
-        }
 
         mTracer.pProgram = Program::create(mpDevice, desc, mpScene->getSceneDefines());
     }
-
-    mpFence = mpDevice->createFence();
-    mpFence->breakStrongReferenceToDevice();
-
-    DefineList defines = mpScene->getSceneDefines();
-    mpDisplayPass = ComputePass::create(mpDevice, "RenderPasses/NeuralMatRendering/Display.cs.slang", "csMain", defines);
-
-
-
-    // cuda timer
-    cudaEventCreate(&mCudaStart);
-    cudaEventCreate(&mCudaStop);
 
     loadNetwork(pRenderContext);
 }

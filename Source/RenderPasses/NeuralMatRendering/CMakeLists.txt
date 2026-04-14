@@ -8,10 +8,8 @@ target_sources(NeuralMatRendering PRIVATE
     NeuralMatRendering.cpp
     NeuralMatRendering.h
     MinimalPathTracer.rt.slang
-    Display.cs.slang
     Tools/Utils.cpp
     Tools/Utils.h
-    Tools/BTFUtils.slang
 )
 set_target_properties(NeuralMatRendering PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_copy_shaders(NeuralMatRendering RenderPasses/NeuralMatRendering)

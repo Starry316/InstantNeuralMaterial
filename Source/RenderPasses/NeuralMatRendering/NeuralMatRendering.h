@@ -208,7 +208,6 @@ private:
 
     // cuda inference output buffer
     ref<Buffer> mpOutputBuffer;
-    ref<Buffer> mpValidBuffer;
 
     Falcor::float4 mControlParas = Falcor::float4(0.1, 10, 0, 0.099);
 
@@ -224,12 +223,7 @@ private:
 
     bool mApplySyn = true;
 
-    /// GPU fence for synchronizing readback.
-    ref<Fence> mpFence;
 
-    std::unique_ptr<TextureSynthesis> mpTextureSynthesis;
-    std::shared_ptr<NBTF> mpNBTFInt8;
-    std::shared_ptr<NBTF> mpNBTF[6];
     std::shared_ptr<NBTF> mpNBTFFP32;
     std::unique_ptr<EnvMapSampler> mpEnvMapSampler;
 
@@ -241,11 +235,8 @@ private:
     bool mInshader = false;
 
     Falcor::float3 mEnvRotAngle = Falcor::float3(0.0f, 0.0f, 0.0f);
-    // cuda
-    float mCudaTime = 0.0;
-    double mCudaAvgTime = 0.0;
-    int cudaInferTimes = 1;
-    cudaEvent_t mCudaStart, mCudaStop;
 
-    uint mCudaAccumulatedFrames = 1;
+
+    uint mMaxBounces = 1;
+    uint mNeumatID = 1;
 };

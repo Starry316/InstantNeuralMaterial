@@ -39,7 +39,6 @@ import Utils.Debug.PixelDebug;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EnvMapSampler;
 
-import Tools.BTFUtils;
 import Utils.Neural.NBTF;
 cbuffer CB
 {
@@ -48,9 +47,10 @@ cbuffer CB
     uint2 gRenderTargetDim;
     float4 gControlParas;
 
-    bool gTracedShadowRay;
     bool gApplySyn;
 
+    uint gNeumatID;
+    uint gMaxBounces;
     EnvMapSampler envMapSampler;
     NBTF gNBTF;
 }
@@ -59,19 +59,19 @@ cbuffer CB
 RWTexture2D<float4> gOutputColor;
 
 SamplerState gSampler;
-SamplerState gMaxSampler;
 
 // Static configuration based on defines set from the host.
 #define is_valid(name) (is_valid_##name != 0)
 static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const float kRayTMax = FLT_MAX;
 
-#define MAX_HEIGHT gControlParas.x
+// #define MAX_HEIGHT gControlParas.x
 #define UV_SCALE gControlParas.y
-#define HF_OFFSET gControlParas.z
-#define HF_SCALE gControlParas.w
-#define SHADOW_OFFSET 0.1
-
+// #define HF_OFFSET gControlParas.z
+// #define HF_SCALE gControlParas.w
+#define kMaxBounces gMaxBounces
+#define kUseAnalyticLights true
+#define kUseImportanceSampling true
 /**
  * Payload for shadow ray.
  */
@@ -87,6 +87,8 @@ struct ScatterRayData
 {
     float3 radiance;  ///< Accumulated outgoing radiance from path.
     bool terminated;  ///< Set to true when path is terminated.
+    float3 thp;       ///< Current path throughput. This is updated at each path vertex.
+    uint pathLength;  ///< Path length in number of path segments (0 at origin, 1 at first secondary hit, etc.). Max 2^31.
     float3 origin;    ///< Next path segment origin.
     float3 direction; ///< Next path segment direction.
 
@@ -98,7 +100,9 @@ struct ScatterRayData
     __init(SampleGenerator sg)
     {
         this.terminated = false;
+        this.pathLength = 0;
         this.radiance = float3(0, 0, 0);
+        this.thp = float3(1, 1, 1);
         this.origin = float3(0, 0, 0);
         this.direction = float3(0, 0, 0);
         this.sg = sg;
@@ -131,29 +135,6 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
     return sd;
 }
 
-ShadingData loadShadingData(
-    const HitInfo hit,
-    const float3 rayOrigin,
-    const float3 rayDir,
-    out GeometryInstanceID instanceID,
-    uint primitiveIndex
-)
-{
-    VertexData v = {};
-    uint materialID = {};
-
-    if (hit.getType() == HitType::DisplacedTriangle)
-    {
-        const DisplacedTriangleHit displacedTriangleHit = hit.getDisplacedTriangleHit();
-        instanceID = displacedTriangleHit.instanceID;
-        primitiveIndex = displacedTriangleHit.primitiveIndex;
-        v = gScene.getVertexData(displacedTriangleHit, -rayDir);
-        materialID = gScene.getMaterialID(displacedTriangleHit.instanceID);
-    }
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir);
-
-    return sd;
-}
 /**
  * Returns the primary ray's direction.
  */
@@ -212,6 +193,34 @@ void traceScatterRay(inout ScatterRayData rayData)
 
     uint rayFlags = 0; // TODO: Set cull mode from the app
     TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+}
+/**
+ * Generate a new scatter ray or terminate.
+ * @param[in] sd Shading data.
+ * @param[in] mi Material instance.
+ * @param[in] isCurveHit True if on curve hit.
+ * @param[in] rayOrigin Ray origin for the new ray.
+ * @param[in,out] rayData Ray payload.
+ * @return True if the path continues.
+ */
+bool generateScatterRay(const ShadingData sd, const IMaterialInstance mi, bool isCurveHit, float3 rayOrigin, inout ScatterRayData rayData)
+{
+    // Sample material.
+    BSDFSample bsdfSample;
+
+    if (mi.sample(sd, rayData.sg, bsdfSample, kUseImportanceSampling))
+    {
+        rayData.origin = rayOrigin;
+        if (!isCurveHit && bsdfSample.isLobe(LobeType::Transmission))
+        {
+            rayData.origin = sd.computeRayOrigin(false);
+        }
+        rayData.direction = bsdfSample.wo;
+        rayData.thp *= bsdfSample.weight;
+        return any(rayData.thp > 0.f);
+    }
+
+    return false;
 }
 
 // Envmap sampling
@@ -280,7 +289,48 @@ void computeRayDifferentials(
     ddx = float2(dsdx, dtdx);
     ddy = float2(dsdy, dtdy);
 }
+/**
+ * Evaluates the direct illumination from analytic lights.
+ * This function samples Falcor's light list uniformly with one shadow ray.
+ * @param[in] sd Shading data.
+ * @param[in] mi Material instance.
+ * @param[in,out] sg SampleGenerator object.
+ * @return Incident radiance from light
+ */
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout float3 lsDir, inout SampleGenerator sg)
+{
+    const uint lightCount = gScene.getLightCount();
+    if (lightCount == 0)
+        return float3(0.f);
 
+    // Pick one of the analytic light sources randomly with equal probability.
+    const uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+    float invPdf = lightCount; // Light selection pdf = 1.0 / lightCount.
+
+    // Sample local light source.
+    AnalyticLightSample ls;
+    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, ls))
+        return float3(0.f);
+    lsDir = ls.dir;
+    // Reject sample if not in the hemisphere of a BSDF lobe.
+    const uint lobeTypes = mi.getLobeTypes(sd);
+    const bool hasReflection = lobeTypes & uint(LobeType::Reflection);
+    const bool hasTransmission = lobeTypes & uint(LobeType::Transmission);
+    float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
+    if ((NdotL <= kMinCosTheta && !hasTransmission) || (NdotL >= -kMinCosTheta && !hasReflection))
+        return float3(0.f);
+
+    // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
+    const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
+
+    // Test visibility by tracing a shadow ray.
+    bool V = traceShadowRay(origin, ls.dir, ls.distance);
+    if (!V)
+        return float3(0.f);
+
+    // Evaluate contribution.
+    return ls.Li * invPdf;
+}
 float4 tracePath(const uint2 pixel, const uint2 frameDim)
 {
     // Create sample generator.
@@ -296,11 +346,118 @@ float4 tracePath(const uint2 pixel, const uint2 frameDim)
     ScatterRayData rayData = ScatterRayData(sg);
     rayData.origin = primaryRayOrigin;
     rayData.direction = primaryRayDir;
-
-    // ===========================  NeuMat  ===========================
-    // Only the valid pixels are needed for cuda inference.
     traceScatterRay(rayData);
+    // Follow path into the scene and compute its total contribution.
+    for (uint depth = 0; depth < kMaxBounces - 1 && !rayData.terminated; depth++)
+    {
+        // Trace scatter ray. If it hits geometry, the closest hit shader samples
+        // direct illumination and generates the next scatter ray.
+        traceScatterRay(rayData);
+    }
+
     return float4(rayData.radiance, 1.0f);
+}
+
+/**
+ * Process a hit.
+ * Loads the shading data, samples analytic lights and samples a new scatter ray.
+ * Terminates the path if maximum number of bounces is reached.
+ * @param[in] hit Hit info.
+ * @param[in,out] rayData Ray payload.
+ *
+ */
+void handleHit(const HitInfo hit, inout ScatterRayData rayData)
+{
+    const bool isCurveHit = hit.getType() == HitType::Curve;
+
+    // Load shading data.
+    ShadingData sd = loadShadingData(hit, rayData.origin, rayData.direction);
+
+    // Create material instance.
+    let lod = ExplicitLodTextureSampler(0.f);
+    let mi = gScene.materials.getMaterialInstance(sd, lod);
+
+    // Add emitted light.
+    // if (kUseEmissiveLights)
+    // {
+    //     rayData.radiance += rayData.thp * mi.getProperties(sd).emission;
+    // }
+
+    // Check whether to terminate based on max depth.
+    if (rayData.pathLength >= kMaxBounces)
+    {
+        rayData.terminated = true;
+        return;
+    }
+
+    // Compute ray origin for new rays spawned from the hit.
+    float3 rayOrigin;
+
+    rayOrigin = sd.computeRayOrigin();
+
+    float2 ddx, ddy;
+    float hitT = length(sd.posW - gScene.camera.getPosition());
+    float3 wo = sd.frame.toLocal(sd.V);
+
+    computeRayDifferentials(hit.getTriangleHit(), -sd.V, hitT, gScene.camera, 1.0f / float2(gRenderTargetDim), ddx, ddy);
+    // Add contribution of direct light from analytic lights.
+    if (kUseAnalyticLights)
+    {
+        float3 lsDir = float3(0);
+        float3 Li = evalDirectAnalytic(sd, mi, lsDir, rayData.sg);
+        if (sd.materialID == gNeumatID)
+        {
+            float3 wi = sd.frame.toLocal(lsDir);
+            float NdotL = wi.z > 0 ? wi.z : 0; // BTF already encodes the cosine term.
+            rayData.radiance += rayData.thp * gNBTF.evalDebug(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * NdotL * Li;
+        }
+        else
+        {
+            rayData.radiance += rayData.thp * mi.eval(sd, lsDir, rayData.sg) * Li;
+        }
+    }
+
+    // Sample env map
+    float3 wiWS; // world space incident direction
+    float3 envLi;
+    float envPdf;
+    if (generateEnvMapSample(sd.computeRayOrigin(), rayData.sg, envLi, wiWS, envPdf))
+    {
+        if (sd.materialID == gNeumatID)
+        {
+            float3 wi = sd.frame.toLocal(wiWS);
+            float NdotL = wi.z > 0 ? wi.z : 0; // BTF already encodes the cosine term.
+            uint4 packedData;
+            uint2 pixel = DispatchRaysIndex().xy;
+            rayData.radiance = rayData.thp * gNBTF.evalDebug(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * envLi * NdotL;
+        }
+        else
+        {
+            rayData.radiance += rayData.thp * envLi * mi.eval(sd, wiWS, rayData.sg);
+        }
+    }
+
+    if (sd.materialID == gNeumatID)
+    {
+        rayData.origin = sd.computeRayOrigin();
+        float pdf = 1.0f;
+        float3 sampledDir = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), pdf);
+        rayData.direction = sd.frame.fromLocal(sampledDir);
+        rayData.thp *= gNBTF.evalDebug(sampledDir, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb / pdf;
+    }
+
+    else
+    {
+        // Generate scatter ray for the next path segment.
+        // The raygen shader will continue the path based on the returned payload.
+        if (!generateScatterRay(sd, mi, isCurveHit, rayOrigin, rayData))
+        {
+            rayData.terminated = true;
+            return;
+        }
+    }
+
+    rayData.pathLength++;
 }
 
 //
@@ -315,7 +472,7 @@ void scatterMiss(inout ScatterRayData rayData)
     uint2 pixel = DispatchRaysIndex().xy;
 
     // Add contribution from distant light (env map) in this direction.
-    if (kUseEnvLight)
+    if (kUseEnvLight && rayData.pathLength == 0)
     {
         float3 Le = gScene.envMap.eval(WorldRayDirection());
         rayData.radiance += Le;
@@ -373,42 +530,5 @@ void rayGen()
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
     gOutputColor[pixel] = tracePath(pixel, frameDim);
-}
-
-// hit non-displaced triangle
-void handleHit(const HitInfo hit, inout ScatterRayData rayData)
-{
-    // Load shading data.
-    ShadingData sd = loadShadingData(hit, rayData.origin, rayData.direction);
-
-    // Create material instance.
-    let lod = ExplicitLodTextureSampler(0.f);
-    let mi = gScene.materials.getMaterialInstance(sd, lod);
-
-    float3 wo = sd.frame.toLocal(sd.V);
-    float3 wiWS; // world space incident direction
-    float3 envLi;
-    float envPdf;
-    // We only use the envmap as light source
-    if (generateEnvMapSample(sd.computeRayOrigin(), rayData.sg, envLi, wiWS, envPdf))
-    {
-        if (sd.materialID == 1)
-        {
-            float2 ddx, ddy;
-            float hitT = length(sd.posW - gScene.camera.getPosition());
-            computeRayDifferentials(hit.getTriangleHit(), -sd.V, hitT, gScene.camera, 1.0f / float2(gRenderTargetDim), ddx, ddy);
-            float3 wi = sd.frame.toLocal(wiWS);
-            float NdotL = wi.z > 0 ? wi.z : 0; // BTF already encodes the cosine term.
-            uint4 packedData;
-            uint2 pixel = DispatchRaysIndex().xy;
-            rayData.radiance = gNBTF.evalDebug(wi, wo, frac(abs(sd.uv)) * UV_SCALE, ddx, ddy, gApplySyn).rgb * envLi * NdotL;
-            rayData.terminated = true;
-        }
-        else
-        {
-            rayData.terminated = true;
-            rayData.radiance += envLi * mi.eval(sd, wiWS, rayData.sg);
-        }
-    }
 }
 
